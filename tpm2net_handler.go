@@ -12,13 +12,19 @@ type TPMHandler struct {
 	Layout Layout
 	Output OutputDevice
 
+	frameBuffer  []uint8
 	outputBuffer []Color
 }
 
 func (hnd *TPMHandler) HandlePacket(pkt *tpm2net.Packet) {
-	buf := pkt.Data
-
 	numLeds := hnd.Layout.NumCells()
+	bufSz := hnd.VirtualWidth * hnd.VirtualHeight * 3
+
+	if len(hnd.frameBuffer) < bufSz {
+		hnd.frameBuffer = make([]uint8, bufSz)
+	}
+	copy(hnd.frameBuffer, pkt.Data)
+
 	if len(hnd.outputBuffer) < numLeds {
 		hnd.outputBuffer = make([]Color, numLeds)
 	}
@@ -51,9 +57,9 @@ func (hnd *TPMHandler) HandlePacket(pkt *tpm2net.Packet) {
 					x < hnd.VirtualWidth && y < hnd.VirtualHeight {
 
 					offs := (y*hnd.VirtualWidth + x) * 3
-					acc[0] += int32(buf[offs])
-					acc[1] += int32(buf[offs+1])
-					acc[2] += int32(buf[offs+2])
+					acc[0] += int32(hnd.frameBuffer[offs])
+					acc[1] += int32(hnd.frameBuffer[offs+1])
+					acc[2] += int32(hnd.frameBuffer[offs+2])
 					cnt++
 				}
 			}
