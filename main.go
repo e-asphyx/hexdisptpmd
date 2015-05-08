@@ -14,6 +14,7 @@ const (
 	ListenAddr    = ":65506"
 	VirtualWidth  = 44
 	VirtualHeight = 44
+	Oversample    = 8
 )
 
 func main() {
@@ -47,6 +48,8 @@ func main() {
 	handler := TPMHandler{
 		VirtualWidth:  VirtualWidth,
 		VirtualHeight: VirtualHeight,
+
+		Oversample: Oversample,
 
 		Layout: &layout,
 		Output: output,

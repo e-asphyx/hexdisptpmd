@@ -9,11 +9,14 @@ type TPMHandler struct {
 	VirtualWidth  int
 	VirtualHeight int
 
+	Oversample int
+
 	Layout Layout
 	Output OutputDevice
 
 	frameBuffer  []uint8
 	outputBuffer []Color
+	cellMap      []map[int]float64
 }
 
 func (hnd *TPMHandler) HandlePacket(pkt *tpm2net.Packet) {
@@ -29,24 +32,57 @@ func (hnd *TPMHandler) HandlePacket(pkt *tpm2net.Packet) {
 		hnd.outputBuffer = make([]Color, numLeds)
 	}
 
+	if len(hnd.cellMap) < numLeds {
+		hnd.initMap()
+	}
+
+	for i := range hnd.outputBuffer {
+		acc := [3]float64{}
+
+		for offs, coeff := range hnd.cellMap[i] {
+			acc[0] += float64(hnd.frameBuffer[offs*3]) * coeff
+			acc[1] += float64(hnd.frameBuffer[offs*3+1]) * coeff
+			acc[2] += float64(hnd.frameBuffer[offs*3+2]) * coeff
+		}
+
+		for c := range acc {
+			if acc[c] > 255.0 {
+				acc[c] = 255.0
+			}
+		}
+
+		hnd.outputBuffer[i] = RGB(uint8(acc[0]+0.5), uint8(acc[1]+0.5), uint8(acc[2]+0.5))
+	}
+
+	if _, err := hnd.Output.Write(hnd.outputBuffer); err != nil {
+		log.Println(err)
+	}
+}
+
+func (hnd *TPMHandler) initMap() {
+	hnd.cellMap = make([]map[int]float64, hnd.Layout.NumCells())
+
 	layoutWidth := hnd.Layout.Width()
 	layoutHeight := hnd.Layout.Height()
 
-	xstep := layoutWidth / float64(hnd.VirtualWidth)
-	ystep := layoutHeight / float64(hnd.VirtualHeight)
+	virtualWidth := hnd.VirtualWidth * hnd.Oversample
+	virtualHeight := hnd.VirtualHeight * hnd.Oversample
 
-	for i := range hnd.outputBuffer {
+	xstep := layoutWidth / float64(virtualWidth)
+	ystep := layoutHeight / float64(virtualHeight)
+
+	for i := range hnd.cellMap {
 		poly := hnd.Layout.Cell(i)
 		tl, br := poly.BoundingBox()
 
-		x0 := int(tl.X / layoutWidth * float64(hnd.VirtualWidth))
-		x1 := int(br.X / layoutWidth * float64(hnd.VirtualWidth))
+		x0 := int(tl.X / layoutWidth * float64(virtualWidth))
+		x1 := int(br.X / layoutWidth * float64(virtualWidth))
 
-		y0 := int(tl.Y / layoutHeight * float64(hnd.VirtualHeight))
-		y1 := int(br.Y / layoutHeight * float64(hnd.VirtualHeight))
+		y0 := int(tl.Y / layoutHeight * float64(virtualHeight))
+		y1 := int(br.Y / layoutHeight * float64(virtualHeight))
 
-		acc := [3]int32{}
-		var cnt int32
+		cnt := make(map[int]int)
+		sum := 0
 
 		for y := y0; y <= y1; y++ {
 			for x := x0; x <= x1; x++ {
@@ -54,32 +90,21 @@ func (hnd *TPMHandler) HandlePacket(pkt *tpm2net.Packet) {
 
 				if poly.PointInside(center) &&
 					x >= 0 && y >= 0 &&
-					x < hnd.VirtualWidth && y < hnd.VirtualHeight {
+					x < virtualWidth && y < virtualHeight {
 
-					offs := (y*hnd.VirtualWidth + x) * 3
-					acc[0] += int32(hnd.frameBuffer[offs])
-					acc[1] += int32(hnd.frameBuffer[offs+1])
-					acc[2] += int32(hnd.frameBuffer[offs+2])
-					cnt++
+					xx := x / hnd.Oversample
+					yy := y / hnd.Oversample
+					offs := (yy*hnd.VirtualWidth + xx)
+
+					cnt[offs]++
+					sum++
 				}
 			}
 		}
 
-		if cnt != 0 {
-			for c := range acc {
-				acc[c] = (acc[c] + (cnt / 2)) / cnt
-				if acc[c] > 255 {
-					acc[c] = 255
-				}
-			}
-		} else {
-			log.Println("Misplaced cell")
+		hnd.cellMap[i] = make(map[int]float64)
+		for offs, c := range cnt {
+			hnd.cellMap[i][offs] = float64(c) / float64(sum)
 		}
-
-		hnd.outputBuffer[i] = RGB(uint8(acc[0]), uint8(acc[1]), uint8(acc[2]))
-	}
-
-	if _, err := hnd.Output.Write(hnd.outputBuffer); err != nil {
-		log.Println(err)
 	}
 }

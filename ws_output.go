@@ -46,8 +46,12 @@ func (out *WSOutput) serve() {
 }
 
 func (out *WSOutput) Write(leds []Color) (n int, err error) {
-	out.ch <- leds
-	return len(leds), nil
+	if len(out.ch) < cap(out.ch) {
+		out.ch <- leds
+		return len(leds), nil
+	} else {
+		return 0, nil
+	}
 }
 
 func (out *WSOutput) Stop() {
